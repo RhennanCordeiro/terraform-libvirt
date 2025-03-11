@@ -1,0 +1,70 @@
+---
+- name: Instalar e configurar GoBGP como daemon
+  hosts: gobgp_servers
+  become: true
+  tasks:
+
+    - name: Atualizar lista de pacotes
+      apt:
+        update_cache: yes
+
+    - name: Instalar dependências
+      apt:
+        name:
+          - curl
+          - unzip
+          - htop
+        state: present
+
+    - name: Baixar e instalar GoBGP
+      shell: |
+        curl -L https://github.com/osrg/gobgp/releases/download/v3.35.0/gobgp_3.35.0_linux_amd64.tar.gz -o /tmp/gobgp.tar.gz
+        tar -xzf /tmp/gobgp.tar.gz -C /usr/local/bin/
+        chmod +x /usr/local/bin/gobgp /usr/local/bin/gobgpd
+      args:
+        creates: /usr/local/bin/gobgp
+
+    - name: Criar diretório de configuração do GoBGP
+      file:
+        path: /etc/gobgp
+        state: directory
+        mode: '0755'
+
+    - name: Criar arquivo de configuração do GoBGP
+      copy:
+        dest: /etc/gobgp/gobgpd.conf
+        content: |
+          [global.config]
+          as = 65001
+          router-id = "192.168.1.1"
+
+          [[neighbors]]
+          [neighbors.config]
+          neighbor-address = "192.168.1.2"
+          peer-as = 65002
+
+    - name: Criar service para o GoBGP
+      copy:
+        dest: /etc/systemd/system/gobgpd.service
+        content: |
+          [Unit]
+          Description=GoBGP daemon
+          After=network.target
+
+          [Service]
+          ExecStart=/usr/local/bin/gobgpd -f /etc/gobgp/gobgpd.conf
+          Restart=always
+          User=root
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Recarregar Systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Habilitar e iniciar GoBGP
+      systemd:
+        name: gobgpd
+        enabled: yes
+        state: started

@@ -1,6 +1,7 @@
 variable "vm_list" {
   default = [
-    { name = "vm1", memory = 2048, vcpu = 2, disk_size = 20 },
+    { name = "gobgp", memory = 2048, vcpu = 2, disk_size = 20 },
+    { name = "gobgp2", memory = 2048, vcpu = 2, disk_size = 20 }
   ]
 }
 
