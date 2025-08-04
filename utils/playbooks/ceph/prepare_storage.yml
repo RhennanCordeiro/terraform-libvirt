@@ -1,0 +1,86 @@
+---
+- name: Configurar IP estático, hostname, locale e instalar Ceph com iSCSI
+  hosts: all
+  become: true
+  vars_files:
+    - vars/ip_map.yml
+
+  tasks:
+    - name: Detectar interface de rede primária
+      command: "ip -o -4 route show to default | awk '{print $5}'"
+      register: iface_raw
+      changed_when: false
+
+    - name: Definir interface de rede
+      set_fact:
+        iface: "{{ iface_raw.stdout }}"
+
+    - name: Mapear nova configuração da máquina
+      set_fact:
+        this_host: "{{ ip_map | selectattr('old_ip', 'equalto', ansible_host) | list | first }}"
+
+    - name: Desabilitar netplan gerado pelo cloud-init
+      copy:
+        dest: /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+        content: "network: {config: disabled}\n"
+
+    - name: Criar arquivo netplan com IP estático
+      copy:
+        dest: /etc/netplan/01-netcfg.yaml
+        content: |
+          network:
+            version: 2
+            ethernets:
+              {{ iface }}:
+                dhcp4: false
+                addresses: [{{ this_host.new_ip }}/{{ netmask }}]
+                routes:
+                  - to: default
+                    via: {{ gateway }}
+                nameservers:
+                  addresses: {{ dns_servers }}
+        mode: '0600'
+
+    - name: Aplicar netplan
+      command: netplan apply
+
+    - name: Definir hostname
+      hostname:
+        name: "{{ this_host.hostname }}"
+
+    - name: Atualizar /etc/hosts com todos os IPs e hostnames
+      blockinfile:
+        path: /etc/hosts
+        block: |
+          {% for entry in ip_map %}
+          {{ entry.new_ip }} {{ entry.hostname }}
+          {% endfor %}
+        marker: "# {mark} ANSIBLE-CEPH-HOSTS"
+
+    - name: Configurar locale para pt_BR.UTF-8
+      locale_gen:
+        name: pt_BR.UTF-8
+        state: present
+
+    - name: Definir locale padrão
+      lineinfile:
+        dest: /etc/default/locale
+        regexp: '^LANG='
+        line: 'LANG=pt_BR.UTF-8'
+
+    - name: Instalar pacotes Ceph com suporte a iSCSI
+      apt:
+        name:
+          - ceph-common
+          - lvm2
+          - targetcli-fb
+          - python3-rados
+          - python3-rbd
+          - python3-cephfs
+          - python3-rgw
+          - python3-prettytable
+          - python3-configshell-fb
+          - python3-rtslib-fb
+          - ceph-iscsi
+        update_cache: true
+        state: present
