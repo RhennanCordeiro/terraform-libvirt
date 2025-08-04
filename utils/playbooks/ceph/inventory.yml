@@ -1,0 +1,17 @@
+all:
+  hosts:
+    sto01:
+      ansible_host: 192.168.122.219
+      new_ip: 192.168.122.101
+    sto02:
+      ansible_host: 192.168.122.183
+      new_ip: 192.168.122.102
+    sto03:
+      ansible_host: 192.168.122.88
+      new_ip: 192.168.122.103
+  vars:
+    gateway: 192.168.122.1
+    netmask: 24
+    dns_servers:
+      - 8.8.8.8
+      - 1.1.1.1

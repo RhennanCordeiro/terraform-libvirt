@@ -2,12 +2,10 @@
 - name: Configurar IP estático, hostname, locale e instalar Ceph com iSCSI
   hosts: all
   become: true
-  vars_files:
-    - vars/ip_map.yml
 
   tasks:
     - name: Detectar interface de rede primária
-      command: "ip -o -4 route show to default | awk '{print $5}'"
+      shell: "ip -o -4 route show to default | awk '{print $5}'"
       register: iface_raw
       changed_when: false
 
@@ -15,14 +13,28 @@
       set_fact:
         iface: "{{ iface_raw.stdout }}"
 
-    - name: Mapear nova configuração da máquina
+    - name: Definir variáveis do host
       set_fact:
-        this_host: "{{ ip_map | selectattr('old_ip', 'equalto', ansible_host) | list | first }}"
+        new_ip: "{{ hostvars[inventory_hostname].new_ip }}"
+        gateway: "{{ hostvars['localhost'].gateway | default('192.168.122.1') }}"
+        netmask: "{{ hostvars['localhost'].netmask | default('24') }}"
+        dns_servers: "{{ hostvars['localhost'].dns_servers | default(['8.8.8.8', '1.1.1.1']) }}"
 
     - name: Desabilitar netplan gerado pelo cloud-init
       copy:
         dest: /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
         content: "network: {config: disabled}\n"
+
+    - name: Limpar configurações netplan existentes
+      file:
+        path: /etc/netplan
+        state: absent
+
+    - name: Recriar diretório netplan limpo
+      file:
+        path: /etc/netplan
+        state: directory
+        mode: '0755'
 
     - name: Criar arquivo netplan com IP estático
       copy:
@@ -33,7 +45,7 @@
             ethernets:
               {{ iface }}:
                 dhcp4: false
-                addresses: [{{ this_host.new_ip }}/{{ netmask }}]
+                addresses: [{{ new_ip }}/{{ netmask }}]
                 routes:
                   - to: default
                     via: {{ gateway }}
@@ -41,19 +53,16 @@
                   addresses: {{ dns_servers }}
         mode: '0600'
 
-    - name: Aplicar netplan
-      command: netplan apply
-
     - name: Definir hostname
       hostname:
-        name: "{{ this_host.hostname }}"
+        name: "{{ inventory_hostname }}"
 
     - name: Atualizar /etc/hosts com todos os IPs e hostnames
       blockinfile:
         path: /etc/hosts
         block: |
-          {% for entry in ip_map %}
-          {{ entry.new_ip }} {{ entry.hostname }}
+          {% for host in groups['all'] %}
+          {{ hostvars[host].new_ip }} {{ host }}
           {% endfor %}
         marker: "# {mark} ANSIBLE-CEPH-HOSTS"
 
@@ -82,5 +91,26 @@
           - python3-configshell-fb
           - python3-rtslib-fb
           - ceph-iscsi
+          - htop
+          - net-tools
+          - vim
+          - curl
+          - curl 
+          - gnupg 
+          - lsb-release 
+          - ssh 
+          - sudo
+          - lvm2
+          - podman
         update_cache: true
         state: present
+
+    - name: Agendar reboot para 10 segundos depois
+      shell: "(sleep 10 && reboot) &"
+      async: 1
+      poll: 0
+
+    - name: Aplicar netplan (em segundo plano, logo antes do reboot)
+      shell: "netplan apply &"
+      async: 1
+      poll: 0
